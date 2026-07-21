@@ -1,0 +1,35 @@
+version: '3.8'
+
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: hv_asistente_virtual_backend
+    ports:
+      - "8003:8003"
+    networks:
+      - red_global
+    env_file:
+      - .env
+    volumes:
+      - .:/app
+    restart: unless-stopped
+    command: uvicorn main:app --host 0.0.0.0 --port 8003 --reload
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: hv_asistente_virtual_frontend
+    ports:
+      - "3003:3003"
+    networks:
+      - red_global
+    restart: unless-stopped
+    depends_on:
+      - backend
+
+networks:
+  red_global:
+    external: true
