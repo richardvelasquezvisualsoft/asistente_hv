@@ -1344,6 +1344,46 @@
                 }
             };
 
+            window.reiniciarSesionClienteOmni = async function() {
+                const contactKey = (typeof activeCRMContactKey !== 'undefined' && activeCRMContactKey) ? activeCRMContactKey : 'active_wa';
+                const contactData = (typeof mockContactsData !== 'undefined' && mockContactsData[contactKey]) ? mockContactsData[contactKey] : {
+                    phone: '51987654321',
+                    channel: 'WhatsApp',
+                    history: []
+                };
+                
+                const canalNorm = (contactData.channel || 'WhatsApp').toLowerCase();
+                const phoneId = (contactData.phone || '51999999999').replace(/[^a-zA-Z0-9]/g, '');
+                const targetPhone = `${canalNorm}_${phoneId || '51999999999'}`;
+
+                if (!confirm(`¿Está seguro de inicializar la sesión? Se borrarán todos los registros, slots e historial de ${contactData.name || 'Cliente'}.`)) return;
+
+                try {
+                    const res = await fetch(`/api/session/${targetPhone}/clear`, { method: 'POST' });
+                    if (res.ok) {
+                        if (contactData.history) contactData.history = [];
+                        
+                        const historyDiv = document.getElementById('omniCRMChatHistory');
+                        if (historyDiv) {
+                            historyDiv.innerHTML = `
+                                <div class="flex flex-col items-center justify-center h-full text-center px-6 py-12">
+                                    <div class="w-16 h-16 bg-emerald-50 rounded-full flex items-center justify-center mb-3 border border-emerald-200">
+                                        <i data-lucide="check-circle" class="w-8 h-8 text-emerald-500"></i>
+                                    </div>
+                                    <h3 class="text-sm font-bold text-slate-700 mb-1">Sesión Inicializada</h3>
+                                    <p class="text-xs text-slate-500 max-w-xs">Se han eliminado los slots, registros e historial de prueba de la base de datos.</p>
+                                </div>
+                            `;
+                            if (window.lucide) setTimeout(() => lucide.createIcons(), 20);
+                        }
+                    } else {
+                        alert("Error al intentar inicializar la sesión en la base de datos.");
+                    }
+                } catch (err) {
+                    alert("Error de red al inicializar la sesión.");
+                }
+            };
+
             window.switchRightTab = function(tab) {
                 const btnFicha = document.getElementById('btnTabFicha');
                 const btnRecursos = document.getElementById('btnTabRecursos');
@@ -1612,15 +1652,20 @@
                     </div>
 
                     <!-- Simulador de Pruebas: Mensaje Entrante del Usuario -->
-                    <form id="simulatedUserForm" onsubmit="simulateIncomingUserMessage(event)" class="flex items-center gap-2 flex-1 max-w-md bg-amber-50/80 border border-amber-200 rounded-full px-3 py-1 shadow-inner">
-                        <span class="text-[11px] font-bold text-amber-700 whitespace-nowrap flex items-center gap-1">
-                            <span>🧪</span><span>Simular Usuario:</span>
-                        </span>
-                        <input type="text" id="simulatedUserInput" placeholder="Escribe consulta como cliente..." class="flex-1 text-[12px] bg-transparent border-none outline-none text-slate-800 placeholder-slate-400">
-                        <button type="submit" class="bg-amber-500 hover:bg-amber-600 text-white text-[11px] font-bold px-3 py-1 rounded-full transition-all flex items-center gap-1 shrink-0 shadow-sm">
-                            <span>Enviar</span><span>📥</span>
+                    <div class="flex items-center gap-2 flex-1 max-w-lg">
+                        <form id="simulatedUserForm" onsubmit="simulateIncomingUserMessage(event)" class="flex items-center gap-2 flex-1 bg-amber-50/80 border border-amber-200 rounded-full px-3 py-1 shadow-inner">
+                            <span class="text-[11px] font-bold text-amber-700 whitespace-nowrap flex items-center gap-1">
+                                <span>🧪</span><span>Simular:</span>
+                            </span>
+                            <input type="text" id="simulatedUserInput" placeholder="Escribe consulta como cliente..." class="flex-1 text-[12px] bg-transparent border-none outline-none text-slate-800 placeholder-slate-400 min-w-0">
+                            <button type="submit" class="bg-amber-500 hover:bg-amber-600 text-white text-[11px] font-bold px-3 py-1 rounded-full transition-all flex items-center gap-1 shrink-0 shadow-sm">
+                                <span>Enviar</span><span>📥</span>
+                            </button>
+                        </form>
+                        <button type="button" onclick="reiniciarSesionClienteOmni()" class="bg-rose-500 hover:bg-rose-600 text-white text-[11px] font-bold px-3 py-1.5 rounded-full transition-all flex items-center gap-1 shrink-0 shadow-sm">
+                            <span>🗑️ Inicializar</span>
                         </button>
-                    </form>
+                    </div>
 
                     <!-- Profile -->
                     <div class="flex items-center gap-3 shrink-0">
