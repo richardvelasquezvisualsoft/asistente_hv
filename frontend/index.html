@@ -1328,6 +1328,22 @@
                 if (window.lucide) setTimeout(() => lucide.createIcons(), 20);
             };
 
+            window.simulateIncomingUserMessage = async function(e) {
+                if (e) e.preventDefault();
+                const input = document.getElementById('simulatedUserInput');
+                if (!input) return;
+                const text = input.value.trim();
+                if (!text) return;
+                
+                // Asignar el texto a la caja de mensaje omnicanal y reutilizar sendOmniMessage
+                const omniInput = document.getElementById('omniCRMMsgInput');
+                if (omniInput) {
+                    omniInput.value = text;
+                    input.value = '';
+                    await window.sendOmniMessage(e);
+                }
+            };
+
             window.switchRightTab = function(tab) {
                 const btnFicha = document.getElementById('btnTabFicha');
                 const btnRecursos = document.getElementById('btnTabRecursos');
@@ -1586,17 +1602,28 @@
             <!-- Panel Central y Derecho -->
             <div class="flex-1 flex flex-col min-w-0 gap-3">
                 <!-- Header Bar -->
-                <div class="flex items-center justify-between bg-white rounded-xl shadow-sm border border-slate-200 px-4 py-2.5">
+                <div class="flex items-center justify-between bg-white rounded-xl shadow-sm border border-slate-200 px-4 py-2.5 gap-4">
                     
                     <!-- Stepper (Pipeline) -->
-                    <div class="flex items-center gap-0 filter drop-shadow-sm">
+                    <div class="flex items-center gap-0 filter drop-shadow-sm shrink-0">
                         <div class="chevron-step active text-slate-900 border border-slate-300 cursor-pointer" onclick="setOmniPhase(this)">Interés</div>
                         <div class="chevron-step text-slate-900 border border-slate-300 cursor-pointer" onclick="setOmniPhase(this)">En Proceso</div>
                         <div class="chevron-step text-slate-900 border border-slate-300 cursor-pointer" onclick="setOmniPhase(this)">Oportunidad</div>
                     </div>
 
+                    <!-- Simulador de Pruebas: Mensaje Entrante del Usuario -->
+                    <form id="simulatedUserForm" onsubmit="simulateIncomingUserMessage(event)" class="flex items-center gap-2 flex-1 max-w-md bg-amber-50/80 border border-amber-200 rounded-full px-3 py-1 shadow-inner">
+                        <span class="text-[11px] font-bold text-amber-700 whitespace-nowrap flex items-center gap-1">
+                            <span>🧪</span><span>Simular Usuario:</span>
+                        </span>
+                        <input type="text" id="simulatedUserInput" placeholder="Escribe consulta como cliente..." class="flex-1 text-[12px] bg-transparent border-none outline-none text-slate-800 placeholder-slate-400">
+                        <button type="submit" class="bg-amber-500 hover:bg-amber-600 text-white text-[11px] font-bold px-3 py-1 rounded-full transition-all flex items-center gap-1 shrink-0 shadow-sm">
+                            <span>Enviar</span><span>📥</span>
+                        </button>
+                    </form>
+
                     <!-- Profile -->
-                    <div class="flex items-center gap-3">
+                    <div class="flex items-center gap-3 shrink-0">
                         <div class="flex items-center gap-2">
                             <div class="relative">
                                 <img src="https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?w=100&h=100&fit=crop" class="w-8 h-8 rounded-full object-cover">
