@@ -1344,25 +1344,47 @@
                 }
             };
 
-            window.reiniciarSesionClienteOmni = async function() {
+            window.closeConfirmResetModal = function() {
+                const modal = document.getElementById('confirmResetModal');
+                if (modal) modal.style.display = 'none';
+            };
+
+            window.reiniciarSesionClienteOmni = function() {
                 const contactKey = (typeof activeCRMContactKey !== 'undefined' && activeCRMContactKey) ? activeCRMContactKey : 'active_wa';
                 const contactData = (typeof mockContactsData !== 'undefined' && mockContactsData[contactKey]) ? mockContactsData[contactKey] : {
+                    name: 'Cliente',
                     phone: '51987654321',
-                    channel: 'WhatsApp',
-                    history: []
+                    channel: 'WhatsApp'
                 };
                 
+                const textElem = document.getElementById('confirmResetModalText');
+                if (textElem) {
+                    textElem.innerHTML = `¿Estás seguro de que deseas inicializar la sesión de <b>${contactData.name || 'Cliente'}</b> (${contactData.channel || 'WhatsApp'})?`;
+                }
+
+                const submitBtn = document.getElementById('btnConfirmResetSubmit');
+                if (submitBtn) {
+                    submitBtn.onclick = async function() {
+                        closeConfirmResetModal();
+                        await ejecutarBorradoSesionOmni(contactKey, contactData);
+                    };
+                }
+
+                const modal = document.getElementById('confirmResetModal');
+                if (modal) modal.style.display = 'block';
+            };
+
+            async function ejecutarBorradoSesionOmni(contactKey, contactData) {
                 const canalNorm = (contactData.channel || 'WhatsApp').toLowerCase();
                 const phoneId = (contactData.phone || '51999999999').replace(/[^a-zA-Z0-9]/g, '');
                 const targetPhone = `${canalNorm}_${phoneId || '51999999999'}`;
-
-                if (!confirm(`¿Está seguro de inicializar la sesión? Se borrarán todos los registros, slots e historial de ${contactData.name || 'Cliente'}.`)) return;
 
                 try {
                     const res = await fetch(`/api/session/${targetPhone}/clear`, { method: 'POST' });
                     if (res.ok) {
                         if (contactData.history) contactData.history = [];
                         
+                        // 1. Limpiar historial central de chat
                         const historyDiv = document.getElementById('omniCRMChatHistory');
                         if (historyDiv) {
                             historyDiv.innerHTML = `
@@ -1374,15 +1396,61 @@
                                     <p class="text-xs text-slate-500 max-w-xs">Se han eliminado los slots, registros e historial de prueba de la base de datos.</p>
                                 </div>
                             `;
-                            if (window.lucide) setTimeout(() => lucide.createIcons(), 20);
                         }
-                    } else {
-                        alert("Error al intentar inicializar la sesión en la base de datos.");
+
+                        // 2. Limpiar también los slots del panel de la derecha (Ficha Cliente)
+                        const cSlots = document.getElementById('omniCRMCardSlots');
+                        if (cSlots) {
+                            cSlots.innerHTML = `
+                                <div class="flex items-center justify-between py-1.5 px-2 rounded-lg bg-slate-50 border border-slate-200">
+                                    <div class="flex items-center gap-2">
+                                        <i data-lucide="calendar" class="w-3.5 h-3.5 text-slate-400"></i>
+                                        <span class="font-medium text-slate-700">Fecha</span>
+                                    </div>
+                                    <span class="text-slate-400 font-medium text-[11px] italic">VACIO</span>
+                                </div>
+                                <div class="flex items-center justify-between py-1.5 px-2 rounded-lg bg-slate-50 border border-slate-200">
+                                    <div class="flex items-center gap-2">
+                                        <i data-lucide="home" class="w-3.5 h-3.5 text-slate-400"></i>
+                                        <span class="font-medium text-slate-700">Ambiente</span>
+                                    </div>
+                                    <span class="text-slate-400 font-medium text-[11px] italic">VACIO</span>
+                                </div>
+                                <div class="flex items-center justify-between py-1.5 px-2 rounded-lg bg-slate-50 border border-slate-200">
+                                    <div class="flex items-center gap-2">
+                                        <i data-lucide="users" class="w-3.5 h-3.5 text-slate-400"></i>
+                                        <span class="font-medium text-slate-700">Invitados</span>
+                                    </div>
+                                    <span class="text-slate-400 font-medium text-[11px] italic">VACIO</span>
+                                </div>
+                                <div class="flex items-center justify-between py-1.5 px-2 rounded-lg bg-slate-50 border border-slate-200">
+                                    <div class="flex items-center gap-2">
+                                        <i data-lucide="dollar-sign" class="w-3.5 h-3.5 text-slate-400"></i>
+                                        <span class="font-medium text-slate-700">Presupuesto</span>
+                                    </div>
+                                    <span class="text-slate-400 font-medium text-[11px] italic">VACIO</span>
+                                </div>
+                            `;
+                        }
+
+                        // 3. Limpiar los slots del sidebar si existen (Slots de la vista automatización)
+                        const slotFecha = document.getElementById('slotFecha');
+                        const slotAmbiente = document.getElementById('slotAmbiente');
+                        const slotInvitados = document.getElementById('slotInvitados');
+                        if (slotFecha) { slotFecha.textContent = 'VACIO'; slotFecha.className = 'slot-value slot-empty'; }
+                        if (slotAmbiente) { slotAmbiente.textContent = 'VACIO'; slotAmbiente.className = 'slot-value slot-empty'; }
+                        if (slotInvitados) { slotInvitados.textContent = 'VACIO'; slotInvitados.className = 'slot-value slot-empty'; }
+
+                        // 4. Limpiar tags dinámicos
+                        const cTags = document.getElementById('omniCRMCardTags');
+                        if (cTags) cTags.innerHTML = '';
+
+                        if (window.lucide) setTimeout(() => lucide.createIcons(), 20);
                     }
                 } catch (err) {
-                    alert("Error de red al inicializar la sesión.");
+                    console.error("Error al inicializar sesión:", err);
                 }
-            };
+            }
 
             window.switchRightTab = function(tab) {
                 const btnFicha = document.getElementById('btnTabFicha');
@@ -1930,7 +1998,8 @@
                 </div>
             </div>
         </div>
-    </div><!-- Modal de Detalle de Error Técnico -->
+    </div>
+    <!-- Modal de Detalle de Error Técnico -->
     <div id="errorDetailModal" class="modal">
         <div class="modal-content" style="max-width: 600px; margin: 10% auto;">
             <div class="modal-header">
@@ -1940,6 +2009,34 @@
             <div class="modal-body">
                 <p style="margin-bottom: 1rem; font-size: 0.9rem; color: var(--text-main);">Se produjo el siguiente error detallado durante la ejecución:</p>
                 <div id="errorModalText" style="font-family: monospace; font-size: 0.8rem; background: rgba(0,0,0,0.3); border: 1px solid var(--border); padding: 1rem; border-radius: 8px; white-space: pre-wrap; word-break: break-all; max-height: 400px; overflow-y: auto; color: #f87171;"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal Elegante de Confirmación para Inicializar Sesión -->
+    <div id="confirmResetModal" class="modal" style="display: none;">
+        <div class="modal-content" style="max-width: 420px; margin: 12% auto; border-radius: 16px; border: 1px solid #fecdd3; overflow: hidden; box-shadow: 0 20px 25px -5px rgba(0,0,0,0.1), 0 10px 10px -5px rgba(0,0,0,0.04);">
+            <div class="modal-header" style="background: #fff1f2; border-bottom: 1px solid #ffe4e6; padding: 1rem 1.25rem;">
+                <h2 style="color: #e11d48; font-size: 1.1rem; font-weight: 700; display: flex; align-items: center; gap: 0.5rem; margin: 0;">
+                    <span>⚠️</span><span>Inicializar Sesión y Datos</span>
+                </h2>
+                <span class="close-btn" onclick="closeConfirmResetModal()" style="color: #9f1239; font-size: 1.4rem;">&times;</span>
+            </div>
+            <div class="modal-body" style="padding: 1.25rem; background: #ffffff;">
+                <p style="margin-bottom: 0.75rem; font-size: 0.875rem; color: #334155; line-height: 1.5;" id="confirmResetModalText">
+                    ¿Estás seguro de que deseas inicializar la sesión?
+                </p>
+                <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 0.75rem; font-size: 0.75rem; color: #64748b; margin-bottom: 1.25rem;">
+                    <ul style="margin: 0; padding-left: 1.2rem; space-y: 0.25rem;">
+                        <li>Borra el <b>Historial de Mensajes</b> conversacionales.</li>
+                        <li>Reinicia los <b>Slots (Fecha, Ambiente, Invitados)</b> a VACIO.</li>
+                        <li>Elimina el estado de atención humana.</li>
+                    </ul>
+                </div>
+                <div style="display: flex; justify-content: flex-end; gap: 0.75rem;">
+                    <button type="button" class="btn" style="padding: 0.5rem 1rem; font-size: 0.8rem; background: #f1f5f9; color: #475569; width: auto; border: 1px solid #cbd5e1;" onclick="closeConfirmResetModal()">Cancelar</button>
+                    <button type="button" id="btnConfirmResetSubmit" class="btn" style="padding: 0.5rem 1.2rem; font-size: 0.8rem; background: #e11d48; color: white; width: auto; font-weight: 600; shadow: 0 2px 4px rgba(225,29,72,0.3);">🗑️ Sí, Inicializar</button>
+                </div>
             </div>
         </div>
     </div>
