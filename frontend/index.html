@@ -942,11 +942,11 @@
     </header>
 
     <div class="main-tabs-container">
-        <button class="main-tab-btn" id="mainTabOmniBtn" onclick="switchMainTab('omni')">Atención Omnicanal</button>
-        <button class="main-tab-btn active" id="mainTabAutoBtn" onclick="switchMainTab('auto')">Automatización</button>
+        <button class="main-tab-btn active" id="mainTabOmniBtn" onclick="switchMainTab('omni')">Atención Omnicanal</button>
+        <button class="main-tab-btn" id="mainTabAutoBtn" onclick="switchMainTab('auto')">Automatización</button>
     </div>
 
-    <main id="main-automation">
+    <main id="main-automation" style="display: none;">
         <!-- Sidebar de Configuración y Slots -->
         <div class="sidebar">
             <div class="panel-card">
@@ -1088,7 +1088,7 @@
     </main>
 
     <!-- Contenedor de Atención Omnicanal -->
-    <div id="main-omnichannel" class="bg-[#e4ecf5] flex flex-col overflow-hidden font-sans text-slate-800" style="display: none; height: calc(100vh - 65px);">
+    <div id="main-omnichannel" class="bg-[#e4ecf5] flex flex-col overflow-hidden font-sans text-slate-800" style="display: flex; height: calc(100vh - 65px);">
         <!-- Estilos CSS Inyectados -->
         <style>
             .chevron-step {
@@ -2868,6 +2868,7 @@
         document.addEventListener('DOMContentLoaded', () => {
             loadBotGlobalStatus();
             loadUserMode();
+            switchMainTab('omni');
             const phoneInput = document.getElementById('inputPhoneNumber');
             if (phoneInput) {
                 phoneInput.addEventListener('change', loadUserMode);
