@@ -43,6 +43,12 @@ class EstadoAgente(TypedDict):
     # Campo extra para el historial de mensajes de la API de OpenAI
     llm_messages: List[Dict[str, Any]]
     llm_model: str
+    
+    # Campo para forzar comportamiento en el primer mensaje
+    es_primera_interaccion: bool
+    
+    # Canal de comunicación (whatsapp, messenger, instagram, correo, telegram, etc.)
+    canal: str
 
 # ------------------------------------------------------------
 # HERRAMIENTAS (TOOLS) PARA EL LLM
@@ -282,9 +288,8 @@ async def nodo_inicializar(state: EstadoAgente) -> Dict[str, Any]:
     # Prompt del sistema desde base de datos
     system_prompt_template = await obtener_system_prompt()
     
-    presentacion_str = "" if presento else "Preséntate en el primer mensaje.\n"
     system_prompt = system_prompt_template.format(
-        presentacion=presentacion_str,
+        presentacion="",
         phone_number=phone_number,
         slots_invitados=slots.get('Sesion_Invitados', 'VACIO'),
         slots_fecha=slots.get('Sesion_FechaISO', 'VACIO'),
@@ -302,9 +307,10 @@ async def nodo_inicializar(state: EstadoAgente) -> Dict[str, Any]:
     consulta_usuario = state["msg_Consulta"]
     llm_messages.append({"role": "user", "content": consulta_usuario})
 
+    canal = state.get("canal", "whatsapp")
     logs = [{
         "paso": "init",
-        "mensaje": f"Agente inicializado. Slots: {slots}"
+        "mensaje": f"Agente inicializado para canal '{canal}'. Slots: {slots}"
     }]
 
     return {
@@ -312,7 +318,8 @@ async def nodo_inicializar(state: EstadoAgente) -> Dict[str, Any]:
         "message_count": msg_count,
         "llm_messages": llm_messages,
         "respuestas": [],
-        "logs_ejecucion": logs
+        "logs_ejecucion": logs,
+        "es_primera_interaccion": not presento
     }
 
 async def nodo_agente(state: EstadoAgente) -> Dict[str, Any]:
@@ -407,9 +414,20 @@ async def nodo_compilar(state: EstadoAgente) -> Dict[str, Any]:
     phone_number = state["phone_number"]
     logs = list(state.get("logs_ejecucion", []))
     
+    # Verificamos directamente si es el primer mensaje para evitar problemas de propagación de estado
+    presento = await bot_se_presento(phone_number)
+    es_primera = not presento
+    
     texto_final = "\n".join(respuestas).strip()
     if not texto_final:
         texto_final = "Hubo un error de procesamiento. Por favor intenta de nuevo."
+        
+    if es_primera:
+        # Si es el primer mensaje y el LLM olvidó saludar naturalmente, inyectamos el saludo
+        saludos_clave = ["teffy", "hola", "bienvenid", "soy la asistente", "soy tu asistente"]
+        if not any(palabra in texto_final.lower() for palabra in saludos_clave):
+            saludo = "¡Hola! Soy Teffy, la asistente virtual de 'Rincón de la Campiña'. 👋\n\n"
+            texto_final = saludo + texto_final
         
     # Guardar en el historial de chat (n8n_chat_histories)
     await guardar_mensaje_historial(phone_number, json.dumps({"role": "user", "message": state["msg_Consulta"]}))
@@ -522,8 +540,8 @@ async def obtener_system_prompt() -> str:
         "Eres Teffy, la asistente virtual del local de eventos 'Rincón de la Campiña'.\n"
         "Tu objetivo es conversar con los usuarios, responder amablemente y recopilar la información necesaria para brindarles un precio.\n"
         "Reglas:\n"
-        "1. Eres cordial. {presentacion}\n"
-        "2. **CÁLIDA, ENTUSIASTA Y HUMANA (MÁXIMA PRIORIDAD)**: Si el usuario menciona que va a celebrar un evento (ej. 'me caso', 'mi boda', 'mi cumpleaños', 'un quinceañero', etc. - incluso si los menciona juntos o bromea), FELICÍTALO efusivamente al inicio de tu respuesta de forma obligatoria (ej: '¡Qué gran noticia! 💖 ¡Muchas felicidades por tu boda / quinceañero! 🎉'). Esta felicitación es de obligado cumplimiento y debe ser tu primera oración.\n"
+        "1. Eres cordial. Responde siempre con un tono amable y servicial.\n"
+        "2. **CÁLIDA, ENTUSIASTA Y HUMANA (MÁXIMA PRIORIDAD)**: ÚNICAMENTE si el usuario menciona de forma explícita en su mensaje que va a celebrar un evento (ej. 'me caso', 'mi boda', 'mi cumpleaños', 'un quinceañero', etc. - incluso si los menciona juntos o bromea), FELICÍTALO efusivamente al inicio de tu respuesta (ej: '¡Qué gran noticia! 💖 ¡Muchas felicidades por tu boda / quinceañero! 🎉'). Esta felicitación es de obligado cumplimiento en ese caso y debe ser tu primera oración. Si el usuario NO menciona ningún evento ni celebración de forma explícita, NO lo felicites de ninguna manera.\n"
         "3. **CONSULTA DE DISPONIBILIDAD OBLIGATORIA (CALENDAR)**: Si el usuario te proporciona una fecha (en su mensaje o si está guardada en el 'Estado actual de la sesión' pero la disponibilidad de la fecha es 'VACIO'), debes llamar de inmediato a la herramienta `verificar_disponibilidad` para comprobar si la fecha está libre. Es de máxima prioridad verificar la fecha en Google Calendar.\n"
         "4. **GUARDADO OBLIGATORIO DE DATOS (SLOTS)**: Si el usuario menciona nuevos datos de fecha (como '28 de julio' -> deduce '2026-07-28'), cantidad de invitados (como '250') o ambiente, o si estos datos difieren o faltan en el 'Estado actual de la sesión', DEBES llamar de inmediato a la herramienta `actualizar_slots_sesion` para guardarlos. Asimismo, si sugieres o infieres un ambiente específico debido a restricciones de aforo (por ejemplo, si hay 300 invitados y descartas el salón cerrado porque solo entran 180, calculando el Jardín Abierto), DEBES llamar de inmediato a `actualizar_slots_sesion` para guardar ese ambiente en la sesión.\n"
         "5. NUNCA asumas capacidades ni información general. Siempre usa la herramienta 'buscar_informacion' si el cliente pregunta sobre el local o detalles de los ambientes.\n"
@@ -538,7 +556,8 @@ async def obtener_system_prompt() -> str:
         "   - Si el cliente te pide específicamente ver más fotos, más videos o el resto (ej: 'pásame más fotos', 'quiero ver el resto del jardín'), llama a la herramienta con `modo='resto'`.\n"
         "   - **CRITICAL**: Debes copiar los enlaces markdown devueltos por la herramienta `obtener_multimedia_ambiente` EXACTAMENTE en tu respuesta final. NUNCA alteres el nombre del archivo, las rutas ni las extensiones (por ejemplo, nunca cambies `.jpeg` a `.jpg`), ni inventes tus propios nombres o textos alternativos de imagen.\n"
         "9. Responde de forma completa, clara y detallada, sin cortar oraciones a medias.\n"
-        "10. **PRECIOS APROXIMADOS**: Al brindarle al usuario el precio calculado por la herramienta, aclara explícitamente que es un **precio aproximado/referencial** y que para obtener una propuesta final formal debe solicitar una cotización formal con un asesor.\n\n"
+        "10. **PRECIOS APROXIMADOS**: Al brindarle al usuario el precio calculado por la herramienta, aclara explícitamente que es un **precio aproximado/referencial** y que para obtener una propuesta final formal debe solicitar una cotización formal con un asesor.\n"
+        "11. **CÁLCULO DE PRECIO OBLIGATORIO (`calcular_precio`)**: Si los tres datos (Fecha, Ambiente e Invitados) ya están completos en el 'Estado actual de la sesión' o si el usuario acaba de completar el dato que faltaba, DEBES llamar de inmediato a la herramienta `calcular_precio` para obtener el costo. NUNCA respondas diciendo que no puedes calcular el precio si los 3 datos están disponibles.\n\n"
         "Estado actual de la sesión (recopilado hasta ahora):\n"
         "- Teléfono del Usuario: {phone_number}\n"
         "- Invitados: {slots_invitados}\n"

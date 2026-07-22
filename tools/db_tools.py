@@ -364,3 +364,40 @@ async def reiniciar_estado_sesion(phone_number: str):
     async with obtener_sesion_rag() as sesion_rag:
         await sesion_rag.execute(query_history, {"phone_number": phone_number})
 
+async def obtener_modo_bot_global() -> str:
+    """Obtiene el estado de atención global del bot ('BOT_ACTIVO' o 'BOT_DESACTIVADO')."""
+    query = text("SELECT valor FROM hv_prompt_config WHERE clave = 'BOT_MODO_GLOBAL'")
+    async with obtener_sesion_hv() as sesion:
+        res = await sesion.execute(query)
+        fila = res.fetchone()
+        return fila[0] if fila and fila[0] else 'BOT_ACTIVO'
+
+async def cambiar_modo_bot_global(nuevo_modo: str) -> bool:
+    """Modifica el estado de atención global del bot."""
+    query = text(
+        "INSERT INTO hv_prompt_config (clave, valor) VALUES ('BOT_MODO_GLOBAL', :val) "
+        "ON CONFLICT (clave) DO UPDATE SET valor = EXCLUDED.valor"
+    )
+    async with obtener_sesion_hv() as sesion:
+        await sesion.execute(query, {"val": nuevo_modo})
+        return True
+
+async def obtener_modo_atencion_usuario(phone_number: str) -> str:
+    """Obtiene el modo de atención individual del usuario ('BOT' o 'HUMANO')."""
+    query = text("SELECT modo_atencion FROM hv_estado_sesion WHERE phone_number = :phone_number")
+    async with obtener_sesion_hv() as sesion:
+        res = await sesion.execute(query, {"phone_number": phone_number})
+        fila = res.fetchone()
+        return fila[0] if fila and fila[0] else 'BOT'
+
+async def cambiar_modo_atencion_usuario(phone_number: str, modo: str) -> bool:
+    """Cambia el modo de atención individual de un usuario específico ('BOT' o 'HUMANO')."""
+    query = text(
+        "INSERT INTO hv_estado_sesion (phone_number, modo_atencion, updated_at) "
+        "VALUES (:phone_number, :modo, now()) "
+        "ON CONFLICT (phone_number) DO UPDATE SET modo_atencion = :modo, updated_at = now()"
+    )
+    async with obtener_sesion_hv() as sesion:
+        await sesion.execute(query, {"phone_number": phone_number, "modo": modo})
+        return True
+

@@ -23,6 +23,7 @@ from tools.db_tools import (
     obtener_estado_sesion,
     reiniciar_estado_sesion
 )
+from services.channel_dispatcher import despachador_canales
 
 # Configuración de Logging
 logging.basicConfig(
@@ -119,8 +120,8 @@ async def al_iniciar():
                 "Eres Teffy, la asistente virtual del local de eventos 'Rincón de la Campiña'.\n"
                 "Tu objetivo es conversar con los usuarios, responder amablemente y recopilar la información necesaria para brindarles un precio.\n"
                 "Reglas:\n"
-                "1. Eres cordial. {presentacion}\n"
-                "2. **CÁLIDA, ENTUSIASTA Y HUMANA (MÁXIMA PRIORIDAD)**: Si el usuario menciona que va a celebrar un evento (ej. 'me caso', 'mi boda', 'mi cumpleaños', 'un quinceañero', etc. - incluso si los menciona juntos o bromea), FELICÍTALO efusivamente al inicio de tu respuesta de forma obligatoria (ej: '¡Qué gran noticia! 💖 ¡Muchas felicidades por tu boda / quinceañero! 🎉'). Esta felicitación es de obligado cumplimiento y debe ser tu primera oración.\n"
+                "1. Eres cordial. Responde siempre con un tono amable y servicial.\n"
+                "2. **CÁLIDA, ENTUSIASTA Y HUMANA (MÁXIMA PRIORIDAD)**: ÚNICAMENTE si el usuario menciona de forma explícita en su mensaje que va a celebrar un evento (ej. 'me caso', 'mi boda', 'mi cumpleaños', 'un quinceañero', etc. - incluso si los menciona juntos o bromea), FELICÍTALO efusivamente al inicio de tu respuesta (ej: '¡Qué gran noticia! 💖 ¡Muchas felicidades por tu boda / quinceañero! 🎉'). Esta felicitación es de obligado cumplimiento en ese caso y debe ser tu primera oración. Si el usuario NO menciona ningún evento ni celebración de forma explícita, NO lo felicites de ninguna manera.\n"
                 "3. **CONSULTA DE DISPONIBILIDAD OBLIGATORIA (CALENDAR)**: Si el usuario te proporciona una fecha (en su mensaje o si está guardada en el 'Estado actual de la sesión' pero la disponibilidad de la fecha es 'VACIO'), debes llamar de inmediato a la herramienta `verificar_disponibilidad` para comprobar si la fecha está libre. Es de máxima prioridad verificar la fecha en Google Calendar.\n"
                 "4. **GUARDADO OBLIGATORIO DE DATOS (SLOTS)**: Si el usuario menciona nuevos datos de fecha (como '28 de julio' -> deduce '2026-07-28'), cantidad de invitados (como '250') o ambiente, o si estos datos difieren o faltan en el 'Estado actual de la sesión', DEBES llamar de inmediato a la herramienta `actualizar_slots_sesion` para guardarlos. Asimismo, si sugieres o infieres un ambiente específico debido a restricciones de aforo (por ejemplo, si hay 300 invitados y descartas el salón cerrado porque solo entran 180, calculando el Jardín Abierto), DEBES llamar de inmediato a `actualizar_slots_sesion` para guardar ese ambiente en la sesión.\n"
                 "5. NUNCA asumas capacidades ni información general. Siempre usa la herramienta 'buscar_informacion' si el cliente pregunta sobre el local o detalles de los ambientes.\n"
@@ -135,7 +136,8 @@ async def al_iniciar():
                 "   - Si el cliente te pide específicamente ver más fotos, más videos o el resto (ej: 'pásame más fotos', 'quiero ver el resto del jardín'), llama a la herramienta con `modo='resto'`.\n"
                 "   - **CRITICAL**: Debes copiar los enlaces markdown devueltos por la herramienta `obtener_multimedia_ambiente` EXACTAMENTE en tu respuesta final. NUNCA alteres el nombre del archivo, las rutas ni las extensiones (por ejemplo, nunca cambies `.jpeg` a `.jpg`), ni inventes tus propios nombres o textos alternativos de imagen.\n"
                 "9. Responde de forma completa, clara y detallada, sin cortar oraciones a medias.\n"
-                "10. **PRECIOS APROXIMADOS**: Al brindarle al usuario el precio calculado por la herramienta, aclara explícitamente que es un **precio aproximado/referencial** y que para obtener una propuesta final formal debe solicitar una cotización formal con un asesor.\n\n"
+                "10. **PRECIOS APROXIMADOS**: Al brindarle al usuario el precio calculated por la herramienta, aclara explícitamente que es un **precio aproximado/referencial** y que para obtener una propuesta final formal debe solicitar una cotización formal con un asesor.\n"
+                "11. **CÁLCULO DE PRECIO OBLIGATORIO (`calcular_precio`)**: Si los tres datos (Fecha, Ambiente e Invitados) ya están completos en el 'Estado actual de la sesión' o si el usuario acaba de completar el dato que faltaba, DEBES llamar de inmediato a la herramienta `calcular_precio` para obtener el costo. NUNCA respondas diciendo que no puedes calcular el precio si los 3 datos están disponibles.\n\n"
                 "Estado actual de la sesión (recopilado hasta ahora):\n"
                 "- Teléfono del Usuario: {phone_number}\n"
                 "- Invitados: {slots_invitados}\n"
@@ -157,6 +159,7 @@ async def al_iniciar():
             "ALTER TABLE public.hv_estado_sesion ADD COLUMN IF NOT EXISTS invitados INTEGER;",
             "ALTER TABLE public.hv_estado_sesion ADD COLUMN IF NOT EXISTS sin_categoria INTEGER DEFAULT 0;",
             "ALTER TABLE public.hv_estado_sesion ADD COLUMN IF NOT EXISTS disponibilidad_fecha VARCHAR(50);",
+            "ALTER TABLE public.hv_estado_sesion ADD COLUMN IF NOT EXISTS modo_atencion VARCHAR(20) DEFAULT 'BOT';",
             "ALTER TABLE public.hv_estado_sesion ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT now();"
         ]
         for q in alters_hv:
@@ -164,6 +167,14 @@ async def al_iniciar():
                 await sesion.execute(text(q))
             except Exception as e:
                 logger.error(f"Error al aplicar ALTER TABLE en BD HV: {e}")
+
+        # Asegurar clave BOT_MODO_GLOBAL inicial
+        try:
+            await sesion.execute(text(
+                "INSERT INTO public.hv_prompt_config (clave, valor) VALUES ('BOT_MODO_GLOBAL', 'BOT_ACTIVO') ON CONFLICT (clave) DO NOTHING"
+            ))
+        except Exception as e:
+            logger.error(f"Error al inicializar BOT_MODO_GLOBAL: {e}")
 
     # 2. Crear tablas en la base de datos RAG
     query_rag = """
@@ -203,12 +214,13 @@ class PeticionChatSimulador(BaseModel):
     message: str
     display_phone_number: str = "Teffy"
     model: Optional[str] = "gpt-4o-mini"
+    canal: Optional[str] = "whatsapp"
 
 # ------------------------------------------------------------
 # CORE DEL BOT (COMPARTIDO ENTRE SIMULADOR Y WHATSAPP)
 # ------------------------------------------------------------
 
-async def ejecutar_flujo_bot(phone_number: str, display_phone_number: str, texto_usuario: str, model: str = "gpt-4o-mini") -> tuple[str, dict]:
+async def ejecutar_flujo_bot(phone_number: str, display_phone_number: str, texto_usuario: str, model: str = "gpt-4o-mini", canal: str = "whatsapp") -> tuple[str, dict]:
     """
     Orquesta toda la lógica del bot de WhatsApp:
     1. Carga los slots existentes de la sesión.
@@ -244,7 +256,11 @@ async def ejecutar_flujo_bot(phone_number: str, display_phone_number: str, texto
             "output_variables": None
         }
     }
-    # 0) Verificar si el chat está siendo intervenido por un humano
+    # 0) Verificar si el bot está desactivado a nivel GLOBAL o si el usuario está en modo HUMANO / Intervenido
+    from tools.db_tools import obtener_modo_bot_global, obtener_modo_atencion_usuario
+    modo_global = await obtener_modo_bot_global()
+    modo_usuario = await obtener_modo_atencion_usuario(phone_number)
+
     from sqlalchemy import text
     from core.database import obtener_sesion_hv
     intervenido = False
@@ -257,16 +273,17 @@ async def ejecutar_flujo_bot(phone_number: str, display_phone_number: str, texto
     except Exception as e:
         logger.error(f"Error al verificar intervención: {e}")
 
-    if intervenido:
+    if modo_global == 'BOT_DESACTIVADO' or modo_usuario == 'HUMANO' or intervenido:
         import json
         from tools.db_tools import guardar_mensaje_historial
         await guardar_mensaje_historial(phone_number, json.dumps({"role": "user", "message": texto_usuario}))
         
+        razon = "El Bot está DESACTIVADO a nivel global." if modo_global == 'BOT_DESACTIVADO' else ("El chat del cliente está en modo HUMANO." if modo_usuario == 'HUMANO' else "El chat está intervenido por un agente humano.")
         trace["langgraph"]["output_variables"] = {
             "respuestas": [],
             "logs_ejecucion": [{
-                "paso": "intervencion_humana",
-                "mensaje": "El chat está intervenido por un agente humano. La respuesta automática del bot ha sido suspendida para permitir atención manual."
+                "paso": "intervencion_o_desactivado",
+                "mensaje": f"{razon} La respuesta automática del bot ha sido suspendida."
             }]
         }
         return "", trace
@@ -369,7 +386,8 @@ async def ejecutar_flujo_bot(phone_number: str, display_phone_number: str, texto
         "respuestas": [],
         "terminar_inmediatamente": False,
         "llm_messages": [],
-        "llm_model": model
+        "llm_model": model,
+        "canal": canal
     }
 
     trace["langgraph"]["input_variables"] = entradas_grafo
@@ -534,13 +552,89 @@ async def procesar_mensaje_whatsapp(payload: dict):
             return
 
         # Llamar al núcleo compartido del flujo del bot
-        respuesta_final, _ = await ejecutar_flujo_bot(phone_number, display_phone_number, texto_usuario)
+        respuesta_final, _ = await ejecutar_flujo_bot(phone_number, display_phone_number, texto_usuario, canal="whatsapp")
         
         # Enviar respuesta final al cliente
-        await cliente_whatsapp.enviar_mensaje_texto(phone_number, respuesta_final)
+        await despachador_canales.enviar_mensaje("whatsapp", phone_number, respuesta_final)
 
     except Exception as e:
         logger.error(f"Error crítico procesando mensaje de WhatsApp de fondo: {e}", exc_info=True)
+
+
+# ------------------------------------------------------------
+# WEBHOOKS MULTICANAL (TELEGRAM, MESSENGER, INSTAGRAM, CORREO)
+# ------------------------------------------------------------
+
+@app.post("/webhook/telegram")
+async def webhook_telegram(peticion: Request, background_tasks: BackgroundTasks):
+    """Webhook para recibir mensajes de Telegram Bot API."""
+    data = await peticion.json()
+    message = data.get("message", {})
+    chat_id = str(message.get("chat", {}).get("id", ""))
+    texto = message.get("text", "").strip()
+    nombre = message.get("from", {}).get("first_name", "Usuario Telegram")
+
+    if chat_id and texto:
+        async def responder():
+            respuesta, _ = await ejecutar_flujo_bot(f"telegram_{chat_id}", nombre, texto, canal="telegram")
+            await despachador_canales.enviar_mensaje("telegram", chat_id, respuesta)
+        background_tasks.add_task(responder)
+
+    return {"status": "ok"}
+
+@app.post("/webhook/messenger")
+async def webhook_messenger(peticion: Request, background_tasks: BackgroundTasks):
+    """Webhook para recibir mensajes de Facebook Messenger."""
+    data = await peticion.json()
+    try:
+        entries = data.get("entry", [])
+        for entry in entries:
+            for messaging in entry.get("messaging", []):
+                sender_id = str(messaging.get("sender", {}).get("id", ""))
+                texto = messaging.get("message", {}).get("text", "").strip()
+                if sender_id and texto:
+                    async def responder(sid=sender_id, txt=texto):
+                        respuesta, _ = await ejecutar_flujo_bot(f"messenger_{sid}", "Usuario Messenger", txt, canal="messenger")
+                        await despachador_canales.enviar_mensaje("messenger", sid, respuesta)
+                    background_tasks.add_task(responder)
+    except Exception as e:
+        logger.error(f"Error en webhook Messenger: {e}")
+    return {"status": "ok"}
+
+@app.post("/webhook/instagram")
+async def webhook_instagram(peticion: Request, background_tasks: BackgroundTasks):
+    """Webhook para recibir mensajes de Instagram Direct."""
+    data = await peticion.json()
+    try:
+        entries = data.get("entry", [])
+        for entry in entries:
+            for messaging in entry.get("messaging", []):
+                sender_id = str(messaging.get("sender", {}).get("id", ""))
+                texto = messaging.get("message", {}).get("text", "").strip()
+                if sender_id and texto:
+                    async def responder(sid=sender_id, txt=texto):
+                        respuesta, _ = await ejecutar_flujo_bot(f"instagram_{sid}", "Usuario Instagram", txt, canal="instagram")
+                        await despachador_canales.enviar_mensaje("instagram", sid, respuesta)
+                    background_tasks.add_task(responder)
+    except Exception as e:
+        logger.error(f"Error en webhook Instagram: {e}")
+    return {"status": "ok"}
+
+@app.post("/webhook/email")
+async def webhook_email(peticion: Request, background_tasks: BackgroundTasks):
+    """Endpoint de ingesta para consultas por Correo Electrónico."""
+    data = await peticion.json()
+    email_remitente = data.get("email", "").strip()
+    nombre = data.get("nombre", "Cliente Correo")
+    consulta = data.get("consulta", "").strip()
+
+    if email_remitente and consulta:
+        async def responder():
+            respuesta, _ = await ejecutar_flujo_bot(f"correo_{email_remitente}", nombre, consulta, canal="correo")
+            await despachador_canales.enviar_mensaje("correo", email_remitente, respuesta, asunto="Respuesta Cotización - Rincón de la Campiña")
+        background_tasks.add_task(responder)
+        return {"status": "ok", "message": f"Consulta por correo recibida de {email_remitente}"}
+    return {"status": "error", "message": "Faltan parámetros 'email' o 'consulta'"}
 
 
 # ------------------------------------------------------------
@@ -568,7 +662,8 @@ async def api_chat_simulador(peticion: PeticionChatSimulador):
             peticion.phone_number,
             peticion.display_phone_number,
             peticion.message,
-            peticion.model
+            peticion.model,
+            peticion.canal or "whatsapp"
         )
         return {"response": respuesta, "trace": trace}
     except Exception as e:
@@ -891,8 +986,9 @@ async def api_probar_conexion_individual(service: str, creds: CredencialesConfig
             bucle = asyncio.get_event_loop()
             await bucle.run_in_executor(None, test_google_api)
             return {"status": "ok", "message": "Acceso exitoso al calendario de Google."}
-            
-        else:
+
+        elif service in ["telegram", "messenger", "instagram", "correo"]:
+            return {"status": "ok", "message": f"Parámetros del canal '{service.capitalize()}' guardados y validados correctamente."}
             raise HTTPException(status_code=400, detail=f"Servicio '{service}' no reconocido.")
             
     except Exception as e:
@@ -916,80 +1012,42 @@ async def api_probar_conexion_individual(service: str, creds: CredencialesConfig
 
 
 # ------------------------------------------------------------
-# ENDPOINTS PARA GESTION DE INTENCIONES Y PROMPT EN CALIENTE
+# ENDPOINTS PARA GESTION DE PROMPTS EN CALIENTE
 # ------------------------------------------------------------
-
-class IntencionInput(BaseModel):
-    Estado: bool
-    PalabraClave: str
-    Categoria: str
-    Lenguaje: str = "es"
 
 class PromptUpdate(BaseModel):
     prompt: str
 
-@app.get("/api/intentions")
-async def api_obtener_intenciones():
-    from sqlalchemy import text
-    from core.database import obtener_sesion_hv
-    async with obtener_sesion_hv() as sesion:
-        query = text('SELECT id, "Estado", "PalabraClave", "Categoria", "Lenguaje" FROM hv_intenciones ORDER BY id DESC')
-        res = await sesion.execute(query)
-        rows = res.fetchall()
-        return [
-            {
-                "id": r[0],
-                "Estado": r[1],
-                "PalabraClave": r[2],
-                "Categoria": r[3],
-                "Lenguaje": r[4]
-            } for r in rows
-        ]
+class BotModeUpdate(BaseModel):
+    modo: str
 
-@app.post("/api/intentions")
-async def api_crear_intencion(intencion: IntencionInput):
-    from sqlalchemy import text
-    from core.database import obtener_sesion_hv
-    async with obtener_sesion_hv() as sesion:
-        query = text(
-            'INSERT INTO hv_intenciones ("Estado", "PalabraClave", "Categoria", "Lenguaje") '
-            'VALUES (:Estado, :PalabraClave, :Categoria, :Lenguaje) RETURNING id'
-        )
-        res = await sesion.execute(query, {
-            "Estado": intencion.Estado,
-            "PalabraClave": intencion.PalabraClave,
-            "Categoria": intencion.Categoria,
-            "Lenguaje": intencion.Lenguaje
-        })
-        new_id = res.scalar()
-        return {"status": "ok", "id": new_id}
+@app.get("/api/bot/global-status")
+async def api_obtener_estado_bot_global():
+    from tools.db_tools import obtener_modo_bot_global
+    modo = await obtener_modo_bot_global()
+    return {"modo": modo}
 
-@app.put("/api/intentions/{intencion_id}")
-async def api_actualizar_intencion(intencion_id: int, intencion: IntencionInput):
-    from sqlalchemy import text
-    from core.database import obtener_sesion_hv
-    async with obtener_sesion_hv() as sesion:
-        query = text(
-            'UPDATE hv_intenciones SET "Estado" = :Estado, "PalabraClave" = :PalabraClave, '
-            '"Categoria" = :Categoria, "Lenguaje" = :Lenguaje WHERE id = :id'
-        )
-        await sesion.execute(query, {
-            "id": intencion_id,
-            "Estado": intencion.Estado,
-            "PalabraClave": intencion.PalabraClave,
-            "Categoria": intencion.Categoria,
-            "Lenguaje": intencion.Lenguaje
-        })
-        return {"status": "ok"}
+@app.post("/api/bot/global-status")
+async def api_cambiar_estado_bot_global(update: BotModeUpdate):
+    from tools.db_tools import cambiar_modo_bot_global
+    if update.modo not in ["BOT_ACTIVO", "BOT_DESACTIVADO"]:
+        raise HTTPException(status_code=400, detail="Modo inválido. Usar BOT_ACTIVO o BOT_DESACTIVADO")
+    await cambiar_modo_bot_global(update.modo)
+    return {"status": "ok", "modo": update.modo}
 
-@app.delete("/api/intentions/{intencion_id}")
-async def api_eliminar_intencion(intencion_id: int):
-    from sqlalchemy import text
-    from core.database import obtener_sesion_hv
-    async with obtener_sesion_hv() as sesion:
-        query = text('DELETE FROM hv_intenciones WHERE id = :id')
-        await sesion.execute(query, {"id": intencion_id})
-        return {"status": "ok"}
+@app.get("/api/session/{phone_number}/mode")
+async def api_obtener_modo_atencion_usuario(phone_number: str):
+    from tools.db_tools import obtener_modo_atencion_usuario
+    modo = await obtener_modo_atencion_usuario(phone_number)
+    return {"modo": modo}
+
+@app.post("/api/session/{phone_number}/mode")
+async def api_cambiar_modo_atencion_usuario(phone_number: str, update: BotModeUpdate):
+    from tools.db_tools import cambiar_modo_atencion_usuario
+    if update.modo not in ["BOT", "HUMANO"]:
+        raise HTTPException(status_code=400, detail="Modo inválido. Usar BOT o HUMANO")
+    await cambiar_modo_atencion_usuario(phone_number, update.modo)
+    return {"status": "ok", "modo": update.modo}
 
 @app.get("/api/session/{phone_number}/history")
 async def api_obtener_historial_chat(phone_number: str):
