@@ -4091,17 +4091,56 @@
 
                 historyDiv.scrollTop = historyDiv.scrollHeight;
 
-                // 3. Cargar datos del cliente activo en la ficha
+                // 3. Cargar datos del cliente activo en la ficha desde la BD
                 const resSlots = await fetch(`/api/session/${phone}`);
                 if (resSlots.ok) {
                     const slots = await resSlots.json();
                     
+                    // Renderizamos slots en tiempo real en la tarjeta de Ficha Cliente
+                    const cSlots = document.getElementById('omniCRMCardSlots');
+                    if (cSlots) {
+                        const valFecha = slots.Sesion_Fecha_ISO && slots.Sesion_Fecha_ISO !== 'VACIO' ? slots.Sesion_Fecha_ISO : 'VACIO';
+                        const valAmb = slots.Sesion_Ambiente && slots.Sesion_Ambiente !== 'VACIO' ? slots.Sesion_Ambiente : 'VACIO';
+                        const valInv = slots.Sesion_Invitados && slots.Sesion_Invitados !== 'VACIO' ? slots.Sesion_Invitados : 'VACIO';
+                        const valDisp = slots.Sesion_Disponibilidad_Fecha && slots.Sesion_Disponibilidad_Fecha !== 'VACIO' ? slots.Sesion_Disponibilidad_Fecha : 'Sin definir';
+
+                        cSlots.innerHTML = `
+                            <div class="flex items-center justify-between py-1.5 px-2 rounded-lg ${valFecha !== 'VACIO' ? 'bg-emerald-50 border border-emerald-100' : 'bg-slate-50 border border-slate-200'}">
+                                <div class="flex items-center gap-2">
+                                    <i data-lucide="calendar" class="w-3.5 h-3.5 ${valFecha !== 'VACIO' ? 'text-emerald-600' : 'text-slate-400'}"></i>
+                                    <span class="font-medium text-slate-700">Fecha</span>
+                                </div>
+                                <span class="${valFecha !== 'VACIO' ? 'text-emerald-700 font-semibold bg-emerald-100' : 'text-slate-400 font-medium italic'} text-[11px] px-2 py-0.5 rounded">${valFecha}</span>
+                            </div>
+                            <div class="flex items-center justify-between py-1.5 px-2 rounded-lg ${valAmb !== 'VACIO' ? 'bg-emerald-50 border border-emerald-100' : 'bg-slate-50 border border-slate-200'}">
+                                <div class="flex items-center gap-2">
+                                    <i data-lucide="home" class="w-3.5 h-3.5 ${valAmb !== 'VACIO' ? 'text-emerald-600' : 'text-slate-400'}"></i>
+                                    <span class="font-medium text-slate-700">Ambiente</span>
+                                </div>
+                                <span class="${valAmb !== 'VACIO' ? 'text-emerald-700 font-semibold bg-emerald-100' : 'text-slate-400 font-medium italic'} text-[11px] px-2 py-0.5 rounded">${valAmb}</span>
+                            </div>
+                            <div class="flex items-center justify-between py-1.5 px-2 rounded-lg ${valInv !== 'VACIO' ? 'bg-amber-50 border border-amber-100' : 'bg-slate-50 border border-slate-200'}">
+                                <div class="flex items-center gap-2">
+                                    <i data-lucide="users" class="w-3.5 h-3.5 ${valInv !== 'VACIO' ? 'text-amber-500' : 'text-slate-400'}"></i>
+                                    <span class="font-medium text-slate-700">Invitados</span>
+                                </div>
+                                <span class="${valInv !== 'VACIO' ? 'text-amber-700 font-semibold bg-amber-100' : 'text-slate-400 font-medium italic'} text-[11px] px-2 py-0.5 rounded">${valInv}</span>
+                            </div>
+                            <div class="flex items-center justify-between py-1.5 px-2 rounded-lg bg-slate-50 border border-slate-200">
+                                <div class="flex items-center gap-2">
+                                    <i data-lucide="dollar-sign" class="w-3.5 h-3.5 text-slate-400"></i>
+                                    <span class="font-medium text-slate-700">Disponibilidad</span>
+                                </div>
+                                <span class="text-slate-600 font-medium text-[11px]">${valDisp}</span>
+                            </div>
+                        `;
+                    }
+
                     // Renderizamos tags dinámicos
                     let tagsHtml = `
-                        <span class="px-2 py-0.5 bg-violet-100 text-violet-700 text-[10px] font-semibold rounded border border-violet-200">[Medicinas]</span>
-                        <span class="px-2 py-0.5 bg-emerald-100 text-emerald-700 text-[10px] font-semibold rounded border border-emerald-200">[Recurrente]</span>
+                        <span class="px-2 py-0.5 bg-violet-100 text-violet-700 text-[10px] font-semibold rounded border border-violet-200">[WhatsApp]</span>
                     `;
-                    if (slots.Sesion_Ambiente !== 'VACIO') {
+                    if (slots.Sesion_Ambiente && slots.Sesion_Ambiente !== 'VACIO') {
                         tagsHtml += `<span class="px-2 py-0.5 bg-blue-100 text-blue-700 text-[10px] font-semibold rounded border border-blue-200">[${slots.Sesion_Ambiente}]</span>`;
                     }
                     if (slots.Sesion_Disponibilidad_Fecha === 'DISPONIBLE') {
